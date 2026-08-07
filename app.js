@@ -90,6 +90,12 @@ messageForm.addEventListener("submit", (event) => {
 deleteChatButton.addEventListener("click", deleteChat);
 copyInviteButton.addEventListener("click", copyInvite);
 messageInput.addEventListener("input", resizeComposer);
+messageInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    messageForm.requestSubmit();
+  }
+});
 
 function normalizeRoomId(value) {
   return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
