@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#111b2b" />
+    <meta name="description" content="İki kişilik, oda koduyla çalışan sade sohbet." />
+    <title>İkili Oda — iki kişi, tek sohbet</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <main class="app-shell">
+      <header class="site-header">
+        <a class="brand" href="./" aria-label="İkili Oda ana sayfa">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i></span>
+          <span>İKİLİ ODA</span>
+        </a>
+        <div class="header-note"><span class="live-dot"></span> yalnızca iki kişi</div>
+      </header>
+
+      <section class="landing-screen" id="landingView">
+        <div class="intro-copy">
+          <p class="eyebrow">sessiz bir köşe / 02</p>
+          <h1>İki kişi.<br /><em>Tek oda.</em></h1>
+          <p class="intro-text">
+            Bir oda kodu paylaşın, konuşmaya başlayın. Hesap açmadan, kalabalık bir akışa karışmadan.
+          </p>
+          <div class="intro-detail">
+            <span class="detail-line"></span>
+            <span>Oda kapandığında mesajlar veritabanından kaldırılır.</span>
+          </div>
+        </div>
+
+        <div class="entry-card">
+          <div class="card-topline">
+            <span>yeni konuşma</span>
+            <span class="card-index">01</span>
+          </div>
+          <h2>Odanı aç</h2>
+          <p class="card-copy">İlk mesajı sen başlat. Karşı tarafa göndermek için bir oda kodu alacaksın.</p>
+          <button class="button button-primary button-wide" id="createRoomButton" type="button">
+            <span>Yeni oda oluştur</span><span class="button-arrow" aria-hidden="true">↗</span>
+          </button>
+
+          <div class="split-rule"><span>veya</span></div>
+
+          <form class="join-form" id="joinForm">
+            <label for="roomCodeInput">Oda kodu</label>
+            <div class="join-row">
+              <input id="roomCodeInput" name="roomCode" type="text" inputmode="text" autocomplete="off" maxlength="10" placeholder="ÖRN. 7K4M2Q" aria-describedby="roomHint" />
+              <button class="button button-secondary" type="submit">Katıl</button>
+            </div>
+            <p class="field-hint" id="roomHint">Karşı tarafın gönderdiği kodu gir.</p>
+          </form>
+
+          <div class="setup-notice" id="setupNotice" hidden>
+            <strong>Firebase bağlantısı bekleniyor.</strong>
+            <span><code>firebase-config.js</code> içindeki alanları Firebase projenin bilgileriyle doldur.</span>
+          </div>
+          <p class="feedback" id="landingFeedback" role="status" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <section class="chat-screen" id="chatView" hidden>
+        <div class="chat-topbar">
+          <div>
+            <p class="eyebrow">aktif konuşma</p>
+            <div class="room-heading">
+              <h1>İki kişilik oda</h1>
+              <span class="status-pill" id="roomStatus"><span class="live-dot"></span> bağlı</span>
+            </div>
+          </div>
+          <div class="chat-actions">
+            <button class="button button-ghost" id="copyInviteButton" type="button">Davet bağlantısını kopyala</button>
+            <button class="button button-danger" id="deleteChatButton" type="button">Sohbeti sil</button>
+          </div>
+        </div>
+
+        <div class="chat-layout">
+          <aside class="chat-aside">
+            <div class="room-stamp">
+              <span class="stamp-label">oda kodu</span>
+              <strong id="roomCodeLabel">—</strong>
+              <span class="stamp-help">Bu kodu diğer kişiyle paylaş.</span>
+            </div>
+            <div class="aside-rule"></div>
+            <p class="aside-caption">Bu oda iki anonim oturum için açıldı. İsim yok, profil yok, sadece konuşma.</p>
+            <div class="presence-row"><span class="presence-orbit"><i></i><i></i></span><span id="presenceLabel">Karşı taraf bekleniyor</span></div>
+          </aside>
+
+          <div class="conversation-card">
+            <div class="messages" id="messageList" aria-live="polite" aria-label="Mesajlar">
+              <div class="empty-state" id="emptyState">
+                <span class="empty-glyph">✳</span>
+                <p>İlk cümle burada başlayabilir.</p>
+              </div>
+            </div>
+            <form class="composer" id="messageForm">
+              <label class="sr-only" for="messageInput">Mesaj yaz</label>
+              <textarea id="messageInput" rows="1" maxlength="2000" placeholder="Bir şey yaz…" autocomplete="off"></textarea>
+              <button class="send-button" id="sendButton" type="submit" aria-label="Mesaj gönder"><span>Gönder</span><span aria-hidden="true">↗</span></button>
+            </form>
+            <div class="composer-footer"><span id="connectionLabel">Bağlantı kuruluyor…</span><span>Mesajlar uçtan uca şifrelenmez.</span></div>
+          </div>
+        </div>
+        <p class="feedback chat-feedback" id="chatFeedback" role="status" aria-live="polite"></p>
+      </section>
+
+      <footer class="site-footer"><span>İKİLİ ODA / 2026</span><span>hafif, geçici, iki kişilik</span></footer>
+    </main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
