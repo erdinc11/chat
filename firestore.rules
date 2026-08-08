@@ -25,6 +25,8 @@ service cloud.firestore {
       allow get: if signedIn()
         && isCurrentRoom(roomId)
         && (
+          resource == null
+          ||
           isParticipant(roomId)
           || resource.data.guestId == null
         );

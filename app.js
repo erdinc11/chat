@@ -124,14 +124,6 @@ async function createRoom() {
 
   try {
     const roomRef = doc(db, "rooms", CURRENT_ROOM_DOC);
-    const currentSnapshot = await getDoc(roomRef);
-    if (currentSnapshot.exists()) {
-      const currentRoom = currentSnapshot.data();
-      if (currentRoom.hostId !== state.authUser.uid && currentRoom.guestId !== state.authUser.uid) {
-        throw new Error("Yeni oda açmak için mevcut sohbetin katılımcısı olmalısın.");
-      }
-    }
-
     const roomId = createRoomId();
     await setDoc(roomRef, {
       roomId,
