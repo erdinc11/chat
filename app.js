@@ -118,7 +118,6 @@ function createRoomId() {
 
 async function createRoom() {
   if (!state.authUser) return showError("Anonim oturum hazırlanıyor, birazdan tekrar dene.", landingFeedback);
-  if (!window.confirm("Yeni oda açılınca mevcut aktif sohbet ve mesajlar kalıcı olarak silinecek. Devam edilsin mi?")) return;
 
   setBusy(createRoomButton, true, "Oda açılıyor…");
   clearFeedback(landingFeedback);
