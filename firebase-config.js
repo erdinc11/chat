@@ -4,7 +4,7 @@ export const firebaseConfig = {
   apiKey: "AIzaSyDGDnTjbbzuy1RTfce_NkxqsjOdRyatrtI",
   authDomain: "deneme-cc1f6.firebaseapp.com",
   projectId: "deneme-cc1f6",
-  databaseURL: "PASTE_REALTIME_DATABASE_URL",
+  databaseURL: "https://deneme-cc1f6-default-rtdb.europe-west1.firebasedatabase.app",
   storageBucket: "deneme-cc1f6.firebasestorage.app",
   messagingSenderId: "659561480937",
   appId: "1:659561480937:web:5553516b62246939522678"
