@@ -1,22 +1,23 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
-  addDoc,
-  collection,
+  arrayUnion,
   deleteDoc,
   doc,
   getDoc,
-  getDocs,
   getFirestore,
-  limit,
   onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
   setDoc,
-  updateDoc,
-  writeBatch
+  updateDoc
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+import {
+  getDatabase,
+  onDisconnect,
+  onValue,
+  ref,
+  remove,
+  set
+} from "https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -46,14 +47,22 @@ const state = {
   room: null,
   stopRoom: null,
   stopMessages: null,
-  deleting: false
+  stopPresence: null,
+  presenceRef: null,
+  presenceRoomId: null,
+  onlineUserCount: 0,
+  leaveTimer: null,
+  deleting: false,
+  autoDeleting: false
 };
 
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const CURRENT_ROOM_DOC = "current";
 const isConfigured = Object.values(firebaseConfig).every((value) => value && !value.startsWith("PASTE_"));
 
 let auth;
 let db;
+let realtimeDb;
 
 if (!isConfigured) {
   setupNotice.hidden = false;
@@ -64,6 +73,7 @@ if (!isConfigured) {
   const app = initializeApp(firebaseConfig);
   auth = getAuth(app);
   db = getFirestore(app);
+  realtimeDb = getDatabase(app);
 
   onAuthStateChanged(auth, (user) => {
     if (user) {
@@ -108,17 +118,30 @@ function createRoomId() {
 
 async function createRoom() {
   if (!state.authUser) return showError("Anonim oturum hazırlanıyor, birazdan tekrar dene.", landingFeedback);
+  if (!window.confirm("Yeni oda açılınca mevcut aktif sohbet ve mesajlar kalıcı olarak silinecek. Devam edilsin mi?")) return;
 
   setBusy(createRoomButton, true, "Oda açılıyor…");
   clearFeedback(landingFeedback);
 
   try {
+    const roomRef = doc(db, "rooms", CURRENT_ROOM_DOC);
+    const currentSnapshot = await getDoc(roomRef);
+    if (currentSnapshot.exists()) {
+      const currentRoom = currentSnapshot.data();
+      if (currentRoom.hostId !== state.authUser.uid && currentRoom.guestId !== state.authUser.uid) {
+        throw new Error("Yeni oda açmak için mevcut sohbetin katılımcısı olmalısın.");
+      }
+    }
+
     const roomId = createRoomId();
-    await setDoc(doc(db, "rooms", roomId), {
+    await setDoc(roomRef, {
+      roomId,
       hostId: state.authUser.uid,
       guestId: null,
+      hasGuest: false,
       status: "active",
-      createdAt: serverTimestamp()
+      createdAt: Date.now(),
+      messages: []
     });
     await connectToRoom(roomId);
   } catch (error) {
@@ -141,17 +164,22 @@ async function joinRoom(rawRoomId) {
   setBusy(joinButton, true, "Katılıyor…");
 
   try {
-    const roomRef = doc(db, "rooms", roomId);
+    const roomRef = doc(db, "rooms", CURRENT_ROOM_DOC);
     const roomSnapshot = await getDoc(roomRef);
     if (!roomSnapshot.exists()) throw new Error("Bu oda bulunamadı veya artık kapalı.");
 
     const room = roomSnapshot.data();
+    if (room.roomId !== roomId) throw new Error("Bu oda artık aktif değil. Yeni oda kodu iste.");
     if (room.hostId !== state.authUser.uid && room.guestId && room.guestId !== state.authUser.uid) {
       throw new Error("Bu oda zaten iki kişiyle dolu.");
     }
     if (room.status !== "active") throw new Error("Bu oda artık aktif değil.");
     if (room.hostId !== state.authUser.uid && !room.guestId) {
-      await updateDoc(roomRef, { guestId: state.authUser.uid, status: "active" });
+      await updateDoc(roomRef, {
+        guestId: state.authUser.uid,
+        hasGuest: true,
+        status: "active"
+      });
     }
     await connectToRoom(roomId);
   } catch (error) {
@@ -170,32 +198,30 @@ async function connectToRoom(roomId) {
   chatView.hidden = false;
   window.history.replaceState({}, "", `${window.location.pathname}?room=${roomId}`);
   clearFeedback(chatFeedback);
-  renderConnection({ status: "active", guestId: null });
+  renderConnection({ status: "active", guestId: null, hasGuest: false });
 
-  const roomRef = doc(db, "rooms", roomId);
+  const roomRef = doc(db, "rooms", CURRENT_ROOM_DOC);
   state.stopRoom = onSnapshot(roomRef, (snapshot) => {
-    if (!snapshot.exists()) return finishDeletedRoom();
+    if (!snapshot.exists() || snapshot.data().roomId !== state.roomId) return finishDeletedRoom();
     state.room = snapshot.data();
     renderConnection(state.room);
-  }, (error) => showError(humanizeFirebaseError(error), chatFeedback));
-
-  const messagesQuery = query(collection(roomRef, "messages"), orderBy("createdAt", "asc"));
-  state.stopMessages = onSnapshot(messagesQuery, (snapshot) => {
-    renderMessages(snapshot.docs.map((message) => ({ id: message.id, ...message.data() })));
+    renderMessages(state.room.messages || []);
+    if (state.presenceRoomId !== roomId) startPresence(roomId);
   }, (error) => showError(humanizeFirebaseError(error), chatFeedback));
 }
 
 function renderConnection(room) {
   const deleting = room.status === "deleting";
+  const locked = deleting || state.deleting || state.autoDeleting;
   const occupied = Boolean(room.guestId);
-  roomStatus.innerHTML = `<span class="live-dot"></span> ${deleting ? "siliniyor" : "bağlı"}`;
+  roomStatus.innerHTML = `<span class="live-dot"></span> ${locked ? "siliniyor" : "bağlı"}`;
   roomStatus.classList.toggle("is-deleting", deleting);
-  presenceLabel.textContent = deleting ? "Mesajlar kaldırılıyor" : occupied ? "Karşı taraf burada" : "Karşı taraf bekleniyor";
-  connectionLabel.textContent = deleting ? "Sohbet temizleniyor…" : occupied ? "Canlı bağlantı" : "Kod paylaşıldı, karşı taraf bekleniyor";
-  messageInput.disabled = deleting;
-  sendButton.disabled = deleting;
-  copyInviteButton.disabled = deleting;
-  deleteChatButton.disabled = deleting && state.deleting;
+  presenceLabel.textContent = locked ? "Mesajlar kaldırılıyor" : occupied ? "Karşı taraf burada" : "Karşı taraf bekleniyor";
+  connectionLabel.textContent = locked ? "Sohbet temizleniyor…" : occupied ? "Canlı bağlantı" : "Kod paylaşıldı, karşı taraf bekleniyor";
+  messageInput.disabled = locked;
+  sendButton.disabled = locked;
+  copyInviteButton.disabled = locked;
+  deleteChatButton.disabled = locked;
 }
 
 function renderMessages(messages) {
@@ -229,22 +255,29 @@ async function sendMessage() {
 
   sendButton.disabled = true;
   try {
-    await addDoc(collection(db, "rooms", state.roomId, "messages"), {
-      senderId: state.authUser.uid,
-      text: text.slice(0, 2000),
-      createdAt: serverTimestamp()
+    await updateDoc(doc(db, "rooms", CURRENT_ROOM_DOC), {
+      messages: arrayUnion({
+        id: crypto.randomUUID(),
+        senderId: state.authUser.uid,
+        text: text.slice(0, 2000),
+        createdAt: Date.now()
+      })
     });
     messageInput.value = "";
     resizeComposer();
   } catch (error) {
     showError(humanizeFirebaseError(error), chatFeedback);
   } finally {
-    sendButton.disabled = state.room?.status === "deleting";
+    sendButton.disabled = state.room?.status === "deleting" || state.deleting || state.autoDeleting;
     messageInput.focus();
   }
 }
 
 async function deleteChat() {
+  await deleteCurrentRoom("Sohbet ve mesajları veritabanından silindi.");
+}
+
+async function deleteCurrentRoom(successMessage) {
   if (!state.roomId || state.deleting || !state.authUser) return;
 
   state.deleting = true;
@@ -256,26 +289,75 @@ async function deleteChat() {
   connectionLabel.textContent = "Sohbet temizleniyor…";
 
   try {
-    const roomRef = doc(db, "rooms", state.roomId);
-    await updateDoc(roomRef, { status: "deleting" });
-
-    const messagesRef = collection(roomRef, "messages");
-    // Firestore batch yazma sınırı 500 olduğu için 450'lik küçük partiler kullanılır.
-    while (true) {
-      const snapshot = await getDocs(query(messagesRef, limit(450)));
-      if (snapshot.empty) break;
-      const batch = writeBatch(db);
-      snapshot.docs.forEach((message) => batch.delete(message.ref));
-      await batch.commit();
-    }
-
-    await deleteDoc(roomRef);
-    finishDeletedRoom();
+    await deleteDoc(doc(db, "rooms", CURRENT_ROOM_DOC));
+    finishDeletedRoom(successMessage);
   } catch (error) {
     state.deleting = false;
+    state.autoDeleting = false;
     deleteChatButton.disabled = false;
     showError(`Silme tamamlanamadı: ${humanizeFirebaseError(error)} Yeniden dene.`, chatFeedback);
   }
+}
+
+function startPresence(roomId) {
+  if (!realtimeDb || !state.authUser) return;
+
+  stopPresenceTracking();
+  const connectionId = crypto.randomUUID();
+  const ownPresenceRef = ref(realtimeDb, `presence/${roomId}/${state.authUser.uid}/${connectionId}`);
+  const roomPresenceRef = ref(realtimeDb, `presence/${roomId}`);
+
+  state.presenceRef = ownPresenceRef;
+  state.presenceRoomId = roomId;
+  state.onlineUserCount = 0;
+
+  state.stopPresence = onValue(roomPresenceRef, (snapshot) => {
+    const presence = snapshot.val() || {};
+    const onlineUsers = Object.values(presence).filter((connections) => (
+      connections && Object.keys(connections).length > 0
+    ));
+    state.onlineUserCount = onlineUsers.length;
+
+    if (state.room?.hasGuest !== true || onlineUsers.length >= 2) {
+      clearTimeout(state.leaveTimer);
+      state.leaveTimer = null;
+      return;
+    }
+
+    if (!state.deleting && !state.autoDeleting && !state.leaveTimer) {
+      state.leaveTimer = window.setTimeout(() => {
+        state.leaveTimer = null;
+        if (state.room?.hasGuest === true && state.onlineUserCount < 2) {
+          autoDeleteAfterLeave();
+        }
+      }, 3000);
+    }
+  }, (error) => showError(humanizeFirebaseError(error), chatFeedback));
+
+  // Önce kopma temizliğini sunucuya kaydet, sonra bu bağlantıyı çevrimiçi yaz.
+  onDisconnect(ownPresenceRef)
+    .remove()
+    .then(() => set(ownPresenceRef, { online: true, at: Date.now() }))
+    .catch((error) => showError(humanizeFirebaseError(error), chatFeedback));
+}
+
+function stopPresenceTracking() {
+  clearTimeout(state.leaveTimer);
+  state.leaveTimer = null;
+  state.stopPresence?.();
+  state.stopPresence = null;
+  state.onlineUserCount = 0;
+
+  const oldPresenceRef = state.presenceRef;
+  state.presenceRef = null;
+  state.presenceRoomId = null;
+  if (oldPresenceRef) remove(oldPresenceRef).catch(() => {});
+}
+
+async function autoDeleteAfterLeave() {
+  if (!state.roomId || state.deleting || state.autoDeleting) return;
+  state.autoDeleting = true;
+  await deleteCurrentRoom("Karşı taraf ayrıldı; sohbet ve mesajları silindi.");
 }
 
 async function copyInvite() {
@@ -290,21 +372,23 @@ async function copyInvite() {
   }
 }
 
-function finishDeletedRoom() {
+function finishDeletedRoom(message = "Sohbet ve mesajları veritabanından silindi.") {
   stopListening();
   state.roomId = null;
   state.room = null;
   state.deleting = false;
+  state.autoDeleting = false;
   chatView.hidden = true;
   landingView.hidden = false;
   roomCodeInput.value = "";
   window.history.replaceState({}, "", window.location.pathname);
-  showError("Sohbet ve mesajları veritabanından silindi.", landingFeedback, "success");
+  showError(message, landingFeedback, "success");
 }
 
 function stopListening() {
   state.stopRoom?.();
   state.stopMessages?.();
+  stopPresenceTracking();
   state.stopRoom = null;
   state.stopMessages = null;
 }
@@ -315,6 +399,9 @@ function resizeComposer() {
 }
 
 function formatTime(timestamp) {
+  if (typeof timestamp === "number") {
+    return new Date(timestamp).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
+  }
   if (!timestamp?.toDate) return "şimdi";
   return timestamp.toDate().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
 }
@@ -340,6 +427,7 @@ function humanizeFirebaseError(error) {
     "auth/operation-not-allowed": "Firebase Authentication içinde Anonim giriş yöntemini aç.",
     "auth/network-request-failed": "İnternet bağlantısını kontrol et.",
     "permission-denied": "Firebase kurallarını firestore.rules dosyasındaki kurallarla güncelle.",
+    "PERMISSION_DENIED": "Realtime Database kurallarını database.rules.json dosyasındaki kurallarla güncelle.",
     "failed-precondition": "Firestore veritabanını Firebase Console'da oluştur."
   };
   return messages[code] || error?.message || "Beklenmeyen bir hata oluştu.";

@@ -6,65 +6,80 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function roomRef(roomId) {
-      return /databases/$(database)/documents/rooms/$(roomId);
+    function isCurrentRoom(roomId) {
+      return roomId == "current";
     }
 
     function isParticipant(roomId) {
       return signedIn()
-        && exists(roomRef(roomId))
+        && isCurrentRoom(roomId)
+        && exists(/databases/$(database)/documents/rooms/$(roomId))
         && (
-          get(roomRef(roomId)).data.hostId == request.auth.uid
-          || get(roomRef(roomId)).data.guestId == request.auth.uid
+          get(/databases/$(database)/documents/rooms/$(roomId)).data.hostId == request.auth.uid
+          || get(/databases/$(database)/documents/rooms/$(roomId)).data.guestId == request.auth.uid
         );
     }
 
     match /rooms/{roomId} {
-      // Oda kodunu bilen anonim kullanıcı, boş odayı görebilir ve katılma isteği yapabilir.
-      allow get: if signedIn() && (
-        isParticipant(roomId)
-        || resource.data.guestId == null
-      );
+      // Spark sürümünde yalnızca tek aktif oda tutulur: rooms/current.
+      allow get: if signedIn()
+        && isCurrentRoom(roomId)
+        && (
+          isParticipant(roomId)
+          || resource.data.guestId == null
+        );
       allow list: if false;
 
+      // İlk oda, current belgesi yokken herhangi bir anonim kullanıcı tarafından açılabilir.
       allow create: if signedIn()
+        && isCurrentRoom(roomId)
         && request.resource.data.hostId == request.auth.uid
         && request.resource.data.guestId == null
-        && request.resource.data.status == "active";
+        && request.resource.data.hasGuest == false
+        && request.resource.data.status == "active"
+        && request.resource.data.roomId is string
+        && request.resource.data.messages is list
+        && request.resource.data.messages.size() == 0;
 
-      // Sadece boş odaya, host olmayan ikinci kişi katılabilir.
-      allow update: if signedIn() && (
+      allow update: if signedIn() && isCurrentRoom(roomId) && (
+        // İkinci kişi boş odaya katılır.
         (
           resource.data.guestId == null
+          && resource.data.hasGuest == false
           && request.auth.uid != resource.data.hostId
           && request.resource.data.hostId == resource.data.hostId
           && request.resource.data.guestId == request.auth.uid
+          && request.resource.data.hasGuest == true
+          && request.resource.data.roomId == resource.data.roomId
           && request.resource.data.status == "active"
+          && request.resource.data.messages == resource.data.messages
         )
-        || (
+        ||
+        // Mevcut katılımcılardan biri yeni global odayı açar ve messages alanını sıfırlar.
+        (
+          isParticipant(roomId)
+          && request.resource.data.hostId == request.auth.uid
+          && request.resource.data.guestId == null
+          && request.resource.data.hasGuest == false
+          && request.resource.data.status == "active"
+          && request.resource.data.roomId is string
+          && request.resource.data.messages is list
+          && request.resource.data.messages.size() == 0
+        )
+        ||
+        // Katılımcılar mevcut odanın messages listesini güncelleyebilir.
+        (
           isParticipant(roomId)
           && request.resource.data.hostId == resource.data.hostId
           && request.resource.data.guestId == resource.data.guestId
-          && request.resource.data.status == "deleting"
+          && request.resource.data.hasGuest == resource.data.hasGuest
+          && request.resource.data.roomId == resource.data.roomId
+          && request.resource.data.status == "active"
+          && request.resource.data.messages is list
         )
       );
 
-      // Mesajlar temizlendikten sonra oda belgesi de silinir.
       allow delete: if isParticipant(roomId);
-
-      match /messages/{messageId} {
-        allow read: if isParticipant(roomId);
-
-        allow create: if isParticipant(roomId)
-          && get(roomRef(roomId)).data.status == "active"
-          && request.resource.data.senderId == request.auth.uid
-          && request.resource.data.text is string
-          && request.resource.data.text.size() > 0
-          && request.resource.data.text.size() <= 2000;
-
-        allow update: if false;
-        allow delete: if isParticipant(roomId);
-      }
     }
   }
 }

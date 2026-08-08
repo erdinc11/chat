@@ -1,0 +1,14 @@
+{
+  "rules": {
+    "presence": {
+      "$roomId": {
+        ".read": "auth != null",
+        "$uid": {
+          "$connectionId": {
+            ".write": "auth != null && auth.uid === $uid"
+          }
+        }
+      }
+    }
+  }
+}
